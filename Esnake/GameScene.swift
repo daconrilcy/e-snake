@@ -1,88 +1,136 @@
-//
-//  GameScene.swift
-//  Esnake
-//
-//  Created by Stéphanie Condamines on 28/02/2026.
-//
-
 import SpriteKit
-import GameplayKit
 
-class GameScene: SKScene {
-    
-    private var label : SKLabelNode?
-    private var spinnyNode : SKShapeNode?
-    
+final class GameScene: SKScene {
+
+    // MARK: - Grid config
+    private let cols = 20
+    private let rows = 30
+    private var cellSize: CGFloat = 18
+
+    // MARK: - Game state
+    private enum Direction { case up, down, left, right }
+    private var direction: Direction = .right
+    private var pendingDirection: Direction = .right
+
+    private struct GridPos: Equatable {
+        var x: Int
+        var y: Int
+    }
+
+    private var headPos = GridPos(x: 5, y: 10)
+    private var headNode: SKSpriteNode!
+
+    // Tick
+    private let tickInterval: TimeInterval = 0.12
+    private var tickActionKey = "snake.tick"
+
+    // MARK: - Scene lifecycle
     override func didMove(to view: SKView) {
-        
-        // Get label node from scene and store it for use later
-        self.label = self.childNode(withName: "//helloLabel") as? SKLabelNode
-        if let label = self.label {
-            label.alpha = 0.0
-            label.run(SKAction.fadeIn(withDuration: 2.0))
+        backgroundColor = .black
+
+        // Compute cellSize to fit screen nicely (responsive)
+        let sizeByWidth = size.width / CGFloat(cols)
+        let sizeByHeight = size.height / CGFloat(rows)
+        cellSize = floor(min(sizeByWidth, sizeByHeight))
+
+        setupHead()
+        setupInput(in: view)
+        startTick()
+    }
+
+    // MARK: - Setup
+    private func setupHead() {
+        headNode = SKSpriteNode(color: .green, size: CGSize(width: cellSize - 2, height: cellSize - 2))
+        headNode.position = point(for: headPos)
+        addChild(headNode)
+    }
+
+    private func setupInput(in view: SKView) {
+        // Avoid multiple recognizers if scene reloads
+        view.gestureRecognizers?.forEach { view.removeGestureRecognizer($0) }
+
+        let up = UISwipeGestureRecognizer(target: self, action: #selector(onSwipe(_:)))
+        up.direction = .up
+
+        let down = UISwipeGestureRecognizer(target: self, action: #selector(onSwipe(_:)))
+        down.direction = .down
+
+        let left = UISwipeGestureRecognizer(target: self, action: #selector(onSwipe(_:)))
+        left.direction = .left
+
+        let right = UISwipeGestureRecognizer(target: self, action: #selector(onSwipe(_:)))
+        right.direction = .right
+
+        [up, down, left, right].forEach { view.addGestureRecognizer($0) }
+    }
+
+    private func startTick() {
+        removeAction(forKey: tickActionKey)
+        let wait = SKAction.wait(forDuration: tickInterval)
+        let step = SKAction.run { [weak self] in self?.step() }
+        let loop = SKAction.repeatForever(SKAction.sequence([wait, step]))
+        run(loop, withKey: tickActionKey)
+    }
+
+    // MARK: - Game loop
+    private func step() {
+        // Apply direction once per tick (prevents ultra-fast changes between ticks)
+        direction = pendingDirection
+
+        var next = headPos
+        switch direction {
+        case .up: next.y += 1
+        case .down: next.y -= 1
+        case .left: next.x -= 1
+        case .right: next.x += 1
         }
-        
-        // Create shape node to use during mouse interaction
-        let w = (self.size.width + self.size.height) * 0.05
-        self.spinnyNode = SKShapeNode.init(rectOf: CGSize.init(width: w, height: w), cornerRadius: w * 0.3)
-        
-        if let spinnyNode = self.spinnyNode {
-            spinnyNode.lineWidth = 2.5
-            
-            spinnyNode.run(SKAction.repeatForever(SKAction.rotate(byAngle: CGFloat(Double.pi), duration: 1)))
-            spinnyNode.run(SKAction.sequence([SKAction.wait(forDuration: 0.5),
-                                              SKAction.fadeOut(withDuration: 0.5),
-                                              SKAction.removeFromParent()]))
+
+        // Wrap-around for now (on verra collision mur après)
+        if next.x < 0 { next.x = cols - 1 }
+        if next.x >= cols { next.x = 0 }
+        if next.y < 0 { next.y = rows - 1 }
+        if next.y >= rows { next.y = 0 }
+
+        headPos = next
+        headNode.position = point(for: headPos)
+    }
+
+    // MARK: - Input
+    @objc private func onSwipe(_ gr: UISwipeGestureRecognizer) {
+        let newDir: Direction
+        switch gr.direction {
+        case .up: newDir = .up
+        case .down: newDir = .down
+        case .left: newDir = .left
+        case .right: newDir = .right
+        default: return
+        }
+
+        // Prevent instant reverse
+        if isOpposite(current: direction, candidate: newDir) { return }
+        pendingDirection = newDir
+    }
+
+    private func isOpposite(current: Direction, candidate: Direction) -> Bool {
+        switch (current, candidate) {
+        case (.up, .down), (.down, .up), (.left, .right), (.right, .left):
+            return true
+        default:
+            return false
         }
     }
-    
-    
-    func touchDown(atPoint pos : CGPoint) {
-        if let n = self.spinnyNode?.copy() as! SKShapeNode? {
-            n.position = pos
-            n.strokeColor = SKColor.green
-            self.addChild(n)
-        }
-    }
-    
-    func touchMoved(toPoint pos : CGPoint) {
-        if let n = self.spinnyNode?.copy() as! SKShapeNode? {
-            n.position = pos
-            n.strokeColor = SKColor.blue
-            self.addChild(n)
-        }
-    }
-    
-    func touchUp(atPoint pos : CGPoint) {
-        if let n = self.spinnyNode?.copy() as! SKShapeNode? {
-            n.position = pos
-            n.strokeColor = SKColor.red
-            self.addChild(n)
-        }
-    }
-    
-    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-        if let label = self.label {
-            label.run(SKAction.init(named: "Pulse")!, withKey: "fadeInOut")
-        }
-        
-        for t in touches { self.touchDown(atPoint: t.location(in: self)) }
-    }
-    
-    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
-        for t in touches { self.touchMoved(toPoint: t.location(in: self)) }
-    }
-    
-    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
-        for t in touches { self.touchUp(atPoint: t.location(in: self)) }
-    }
-    
-    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
-        for t in touches { self.touchUp(atPoint: t.location(in: self)) }
-    }
-    
-    
-    override func update(_ currentTime: TimeInterval) {
-        // Called before each frame is rendered
+
+    // MARK: - Grid mapping
+    private func point(for pos: GridPos) -> CGPoint {
+        // Center grid in scene
+        let gridW = CGFloat(cols) * cellSize
+        let gridH = CGFloat(rows) * cellSize
+
+        let originX = (size.width - gridW) / 2
+        let originY = (size.height - gridH) / 2
+
+        let x = originX + (CGFloat(pos.x) + 0.5) * cellSize
+        let y = originY + (CGFloat(pos.y) + 0.5) * cellSize
+        return CGPoint(x: x, y: y)
     }
 }
